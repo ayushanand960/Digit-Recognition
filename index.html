@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Handwritten Digit Recognition</title>
+<style>
+  /* Reset and base */
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color: #fff;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    min-height: 100vh;
+    align-items: center;
+    justify-content: center;
+  }
+  #app {
+    background: #2f2f4a;
+    border-radius: 20px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+    max-width: 400px;
+    width: 100%;
+    padding: 30px 25px 40px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  h1 {
+    margin-top: 0;
+    margin-bottom: 15px;
+    font-weight: 700;
+    font-size: 1.8rem;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+  }
+
+  #canvas-container {
+    position: relative;
+    width: 280px;
+    height: 280px;
+    border-radius: 12px;
+    box-shadow:
+      inset 0 0 25px rgba(255,255,255,0.2),
+      0 0 15px rgba(255, 255, 255, 0.1);
+    background: #111122;
+    touch-action: none;
+  }
+
+  canvas {
+    border-radius: 12px;
+    background-color: #111122;
+    touch-action: none;
+    width: 100%;
+    height: 100%;
+  }
+
+  .buttons {
+    display: flex;
+    justify-content: space-around;
+    margin-top: 15px;
+    width: 100%;
+  }
+
+  button {
+    cursor: pointer;
+    border: none;
+    background: #667eea;
+    color: white;
+    font-weight: 600;
+    padding: 10px 15px;
+    font-size: 1rem;
+    border-radius: 30px;
+    box-shadow: 0 5px 15px rgba(102,126,234,0.5);
+    transition: background-color 0.3s ease;
+    flex: 1;
+    margin: 0 8px;
+  }
+  button:hover, button:focus {
+    background: #5a6dcf;
+    outline: none;
+  }
+  button:active {
+    background: #4a5db8;
+    box-shadow: 0 3px 7px rgba(102,126,234,0.6) inset;
+  }
+
+  #upload-label {
+    font-weight: 600;
+    padding: 10px 15px;
+    background: #764ba2;
+    border-radius: 30px;
+    box-shadow: 0 5px 15px rgba(118,75,162,0.5);
+    cursor: pointer;
+    flex: 1;
+    margin: 0 8px;
+    text-align: center;
+    user-select: none;
+    transition: background-color 0.3s ease;
+  }
+  #upload-label:hover {
+    background: #633d8a;
+  }
+
+  input[type="file"] {
+    display: none;
+  }
+
+  #result {
+    margin-top: 25px;
+    font-size: 1.4rem;
+    font-weight: 700;
+    text-align: center;
+    min-height: 2em;
+  }
+
+  #loader {
+    margin-top: 20px;
+    border: 5px solid #ccc;
+    border-top: 5px solid #667eea;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    display: none;
+  }
+  @keyframes spin {
+    0% { transform: rotate(0deg);}
+    100% { transform: rotate(360deg);}
+  }
+
+  /* Responsive for mobile (max width 400px) */
+  @media screen and (max-width: 400px) {
+    #app {
+      max-width: 95vw;
+      padding: 20px 15px 30px;
+    }
+    #canvas-container {
+      width: 95vw;
+      height: 95vw;
+      max-width: 280px;
+      max-height: 280px;
+    }
+  }
+</style>
+</head>
+<body>
+  <div id="app" role="main" aria-label="Handwritten digit recognition interface">
+    <h1>Digit Recognizer</h1>
+    <div id="canvas-container">
+      <canvas id="canvas" width="280" height="280" aria-label="Canvas to draw digit"></canvas>
+    </div>
+
+    <div class="buttons" role="group" aria-label="Controls">
+      <button id="clear-btn" aria-label="Clear drawing">Clear</button>
+      <label for="upload" id="upload-label" tabindex="0" aria-label="Upload an image of digit">Upload Image</label>
+      <input type="file" id="upload" accept="image/*" aria-hidden="true" />
+      <button id="predict-btn" aria-label="Predict digit">Predict</button>
+    </div>
+
+    <div id="loader" role="alert" aria-live="assertive" aria-atomic="true" aria-hidden="true"></div>
+
+    <div id="result" aria-live="polite" aria-atomic="true"></div>
+  </div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.9.0/dist/tf.min.js"></script>
+<script>
+  (async () => {
+    'use strict';
+
+    // Model URL - use raw GitHub URL for raw file access
+    const modelUrl = 'https://raw.githubusercontent.com/ayushanand960/Digit-Recognition/master/digit_recognizer_models/model.json';
+    let model;
+
+    // Load model and show loader during load
+    const loaderEl = document.getElementById('loader');
+    const resultEl = document.getElementById('result');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const clearBtn = document.getElementById('clear-btn');
+    const predictBtn = document.getElementById('predict-btn');
+    const uploadInput = document.getElementById('upload');
+    const uploadLabel = document.getElementById('upload-label');
+
+    function showLoader() {
+      loaderEl.style.display = 'inline-block';
+      loaderEl.setAttribute('aria-hidden', 'false');
+    }
+    function hideLoader() {
+      loaderEl.style.display = 'none';
+      loaderEl.setAttribute('aria-hidden', 'true');
+    }
+
+    function grayoutCanvas() {
+      ctx.fillStyle = '#111122';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    // Clear canvas and reset
+    function clearCanvas() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      grayoutCanvas();
+      resultEl.textContent = '';
+      drawn = false;
+    }
+
+    // Initialize canvas style
+    grayoutCanvas();
+
+    let drawn = false;
+    let isDrawing = false;
+
+    // Set drawing style
+    ctx.lineWidth = 18;
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = 'white';
+
+    // Functions to handle drawing on canvas
+    function getTouchPos(canvasDom, touchEvent) {
+      const rect = canvasDom.getBoundingClientRect();
+      const touch = touchEvent.touches[0];
+      return {
+        x: (touch.clientX - rect.left) * (canvasDom.width / rect.width),
+        y: (touch.clientY - rect.top) * (canvasDom.height / rect.height)
+      };
+    }
+
+    function handleStart(e) {
+      e.preventDefault();
+      isDrawing = true;
+      ctx.beginPath();
+      let pos;
+      if (e.type === 'mousedown') {
+        pos = {x: e.offsetX, y: e.offsetY};
+      } else {
+        pos = getTouchPos(canvas, e);
+      }
+      ctx.moveTo(pos.x, pos.y);
+    }
+    function handleMove(e) {
+      if (!isDrawing) return;
+      e.preventDefault();
+      let pos;
+      if (e.type === 'mousemove') {
+        pos = {x: e.offsetX, y: e.offsetY};
+      } else {
+        pos = getTouchPos(canvas, e);
+      }
+      ctx.lineTo(pos.x, pos.y);
+      ctx.stroke();
+      drawn = true;
+    }
+    function handleEnd(e) {
+      e.preventDefault();
+      if (!isDrawing) return;
+      isDrawing = false;
+      ctx.closePath();
+    }
+
+    // Mouse events
+    canvas.addEventListener('mousedown', handleStart);
+    canvas.addEventListener('mousemove', handleMove);
+    canvas.addEventListener('mouseup', handleEnd);
+    canvas.addEventListener('mouseleave', handleEnd);
+    // Touch events
+    canvas.addEventListener('touchstart', handleStart, {passive:false});
+    canvas.addEventListener('touchmove', handleMove, {passive:false});
+    canvas.addEventListener('touchend', handleEnd, {passive:false});
+    canvas.addEventListener('touchcancel', handleEnd, {passive:false});
+
+    clearBtn.addEventListener('click', clearCanvas);
+
+    // Handle keyboard accessibility for upload label
+    uploadLabel.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        uploadInput.click();
+      }
+    });
+
+    // Load and process uploaded image on file input change
+    uploadInput.addEventListener('change', (e) => {
+      if (uploadInput.files.length === 0) return;
+      const file = uploadInput.files[0];
+      const reader = new FileReader();
+      reader.onload = function(evt) {
+        const img = new Image();
+        img.onload = () => {
+          // Draw image to canvas scaling and centering
+          ctx.fillStyle = '#111122';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          // Calculate scale for fitting max dimension
+          let scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+          let x = (canvas.width - img.width * scale) / 2;
+          let y = (canvas.height - img.height * scale) / 2;
+          ctx.drawImage(img, x, y, img.width * scale, img.height * scale);
+
+          drawn = true;
+          resultEl.textContent = '';
+        };
+        img.src = evt.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // Preprocess image data to 28x28 grayscale tensor for model
+    function preprocessCanvasImage() {
+      // Create an offscreen canvas to resize image to 28x28
+      const offCanvas = document.createElement('canvas');
+      offCanvas.width = 28;
+      offCanvas.height = 28;
+      const offCtx = offCanvas.getContext('2d');
+
+      // Draw current canvas content into offscreen with resizing
+      offCtx.drawImage(canvas, 0, 0, 28, 28);
+
+      // Get image data
+      const imageData = offCtx.getImageData(0, 0, 28, 28);
+      const data = imageData.data;
+
+      // Create a Float32Array for grayscale pixels
+      const grayPixels = new Float32Array(28 * 28);
+
+      for (let i = 0, j = 0; i < data.length; i += 4, j++) {
+        // Simple grayscale luminosity formula:
+        // White drawing on dark background, invert colors for model input
+        let r = data[i];
+        let g = data[i + 1];
+        let b = data[i + 2];
+        let alpha = data[i + 3];
+
+        // Convert to grayscale
+        let gray = (r + g + b) / 3;
+
+        // Normalize to [0,1], invert color: drawing in white → high pixel value
+        gray = (255 - gray) / 255;
+
+        // If alpha is 0 (transparent) treat as background 0
+        if (alpha === 0) {
+          gray = 0;
+        }
+
+        grayPixels[j] = gray;
+      }
+
+      // Make 4D tensor [1,28,28,1]
+      return tf.tensor4d(grayPixels, [1, 28, 28, 1]);
+    }
+
+    // Prediction function
+    async function predict() {
+      if (!drawn) {
+        resultEl.textContent = 'Please draw or upload a digit first!';
+        return;
+      }
+      showLoader();
+      try {
+        const input = preprocessCanvasImage();
+        const prediction = model.predict(input);
+        const scores = prediction.dataSync();
+        input.dispose();
+        prediction.dispose();
+
+        // Find the max score digit
+        let maxScore = -Infinity;
+        let digit = -1;
+        for(let i=0; i < scores.length; i++) {
+          if(scores[i] > maxScore) {
+            maxScore = scores[i];
+            digit = i;
+          }
+        }
+
+        // Show with percentage confidence
+        const confidence = (maxScore * 100).toFixed(2);
+        resultEl.textContent = `Prediction: ${digit} (Confidence: ${confidence}%)`;
+
+      } catch (e) {
+        resultEl.textContent = 'Prediction failed. Please try again.';
+        console.error(e);
+      }
+      hideLoader();
+    }
+
+    predictBtn.addEventListener('click', predict);
+
+    // On load: Load model
+    resultEl.textContent = 'Loading model, please wait...';
+    showLoader();
+    try {
+      model = await tf.loadLayersModel(modelUrl);
+      // Warm up model with zero input
+      model.predict(tf.zeros([1,28,28,1])).dispose();
+      resultEl.textContent = 'Model loaded. Draw or upload a digit and click Predict.';
+    } catch (e) {
+      resultEl.textContent = 'Failed to load model.';
+      console.error(e);
+    }
+    hideLoader();
+
+  })();
+</script>
+</body>
+</html>
+
